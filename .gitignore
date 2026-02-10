@@ -2,6 +2,7 @@
 *.cfg
 
 # compilation outputs
+peerProcess
 project1
 main.o
 

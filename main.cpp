@@ -29,10 +29,26 @@ void readCommonConfig();
 void readPeerInfoConfig();
 
 /**  main function */
-int main() {
+int main(int argc, char** argv) {
     initialize();
+    
+    if (argc == 1) {
+        cerr << "Needs a processID number to start" << endl;
+        exit(2);
+    }
 
+    int peerProcessID = atoi(argv[1]);
+    cout << peerProcessID << endl;
 
+    /*
+    determine which peerProcess this is
+    check and connect to all previously started peerProcesses (oldID < thisID)
+    wait and accept future connections
+
+    foreach connection:
+        send messages back and forth
+    
+    */
     return 0;
 }
 
@@ -49,7 +65,7 @@ void readCommonConfig() {
 
     if (!config) {
         cerr << "Failed to open Common.cfg" << endl;
-        exit(-1);
+        exit(1);
     }
 
     string temp;
@@ -89,7 +105,7 @@ void readPeerInfoConfig() {
 
     if (!config) {
         cerr << "Failed to open Common.cfg" << endl;
-        exit(-1);
+        exit(1);
     }
     
     string temp;
