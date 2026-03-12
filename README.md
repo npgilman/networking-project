@@ -4,6 +4,21 @@ Per the project description:
 In this project, you are asked to write a P2P file sharing software similar to BitTorrent.
 ```
 
+## Building
+```
+run 'make' from the root directory of the project folder.
+
+executible will be called 'peerProcess'
+```
+
+## Running
+```
+run './peerProcess <process_id>' from the root directory
+
+process_ids should be used in order of appearance in the PeerInfo.cfg.
+This ensures that clients only reach out to clients that have been initialized.
+```
+
 ## Message Formats
 ### Handshake Message
 Sent after establishing an intial TCP connection between peers.
