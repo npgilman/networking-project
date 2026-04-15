@@ -17,6 +17,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+// imports from defined classes
+#include "Logger.h"
+
 #define MAX_CONNECTIONS 10
 #define MAX_DATA_SIZE 100
 
@@ -42,22 +45,7 @@ std::vector<PeerInfo*> peerInfo;
 std::map<unsigned int, unsigned int> peerID2idx;
 
 /* Logging utilities */
-std::fstream logFile;
-void openLog(std::string logFileName);
-void closeLog();
-void logMessage(std::string msg);
-void logTimestamp();
-void logConnectMake(unsigned int host, unsigned int remote);
-void logConnectRecv(unsigned int host, unsigned int remote);
-void logUpdatePrefNeighbors(unsigned int host, unsigned int* remoteArr);
-void logUpdateOptUnchokedNeighbor(unsigned int host, unsigned int remote);
-void logUnchoking(unsigned int host, unsigned int remote);
-void logChoking(unsigned int host, unsigned int remote);
-void logRecvHave(unsigned int host, unsigned int remote);
-void logRecvInterested(unsigned int host, unsigned int remote);
-void logRecvNotInterested(unsigned int host, unsigned int remote);
-void logDownloaded(unsigned int host, unsigned int remote, unsigned int piece, unsigned int total);
-void logCompletion(unsigned int host);
+Logger* loggingUtil = nullptr;
 
 /**  funciton prototypes */
 void initialize();
@@ -78,8 +66,7 @@ int main(int argc, char** argv) {
     int peerProcessID = atoi(argv[1]);
     std::cout << peerProcessID << std::endl;
     
-    openLog("log_peer_" + processIDString  + ".log");
-
+    loggingUtil = new Logger(peerProcessID, "log_peer_" + processIDString + ".log");
 
     // client.c
     for (int i = 0; i < peerID2idx[peerProcessID]; i++) {
@@ -138,7 +125,7 @@ int main(int argc, char** argv) {
             freeaddrinfo(servinfo);   
 
             printf("client: connected to %s\n", s);
-            logConnectMake(peerProcessID, p_info->id);
+            loggingUtil->logConnectMake(peerProcessID, p_info->id);
 
             int pID = htonl(peerProcessID);
             if (send(sockfd, &pID, sizeof(pID), 0) == -1) {
@@ -245,7 +232,7 @@ int main(int argc, char** argv) {
         pID = ntohl(pID);
 
         printf("server: connected from '%d'\n", pID);
-        logConnectRecv(peerProcessID, (unsigned int) pID);
+        loggingUtil->logConnectRecv(peerProcessID, (unsigned int) pID);
 
         if (!fork()) {
             close(sockfd);
@@ -276,7 +263,7 @@ int main(int argc, char** argv) {
         close(new_fd); 
     }
 
-    closeLog();
+    loggingUtil->closeLog();
     
     return 0;
 }
@@ -364,141 +351,3 @@ void readPeerInfoConfig() {
     std::cout << "Finished reading peerInfo.cfg" << std::endl;
 }
 
-void openLog(std::string logFileName) {
-    logFile.open(logFileName, std::ios::out | std::ios::trunc);
-
-    if (!logFile.is_open()) {
-        std::cerr << "Failed to open log file: " << logFileName << std::endl;
-        exit(1);
-    }
-}
-
-void closeLog() {
-    logFile.close();
-}
-
-void logMessage(std::string message) {
-    logFile << message << std::endl;
-}
-
-void logTimestamp() {
-    auto t = std::time(nullptr);
-    auto tm = *std::localtime(&t);
-    logFile << "[";
-    logFile << std::put_time(&tm, "%d-%m-%Y %H-%M-%S");
-    logFile << "]: ";
-}
-
-void logConnectMake(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " makes a connection to Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logConnectRecv(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is connected from Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logUpdatePrefNeighbors(unsigned int host, unsigned int* remoteArr) {
-    logTimestamp();
-    if (remoteArr == nullptr) {} // TODO: print a line and exit
-
-    logFile << "Peer ";
-    logFile << host;
-    logFile << "has the preferred neighbors ";
-    // logFile << remoteArr; // TODO: print the array of neighbors
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logUpdateOptUnchokedNeighbor(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has the optimistically unchoked neighbor ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logUnchoking(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is unchoked by Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logChoking(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is choked by Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvHave(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'have' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvInterested(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'interested' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvNotInterested(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'not interested' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logDownloaded(unsigned int host, unsigned int remote, unsigned int piece, unsigned int total)  {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has downloaded the piece ";
-    logFile << piece;
-    logFile << " from ";
-    logFile << remote;
-    logFile << ". Now the number of pieces it has is ";
-    logFile << total;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logCompletion(unsigned int host)  {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has downloaded the complete file";
-    logFile << std::endl;
-}
