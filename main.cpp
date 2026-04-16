@@ -1,5 +1,3 @@
-#include <ctime>
-#include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <map>
@@ -17,58 +15,24 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+// imports from defined classes
+#include "LogUtils.h"
+#include "ConfigUtils.h"
+
 #define MAX_CONNECTIONS 10
 #define MAX_DATA_SIZE 100
 
-// using namespace std;
+/* Utilities */
+LogUtils* logUtils = nullptr;
+ConfigUtils* configUtils = nullptr;
 
-/** configuration variables */
-/* Common.cfg vars */
-unsigned int numPreferredNeighbors = 0;
-unsigned int unchokingInterval = 999999;
-unsigned int optimisticUnchokingInterval = 999999; 
-std::string fileName = "";
-unsigned int fileSize;
-unsigned int pieceSize;
-
-/* PeerInfo.cfg vars */
-struct PeerInfo {
-    unsigned int id;
-    std::string hostname;
-    std::string port;
-    bool hasCompleteFile;
-} typedef PeerInfo;
-std::vector<PeerInfo*> peerInfo;
-std::map<unsigned int, unsigned int> peerID2idx;
-
-/* Logging utilities */
-std::fstream logFile;
-void openLog(std::string logFileName);
-void closeLog();
-void logMessage(std::string msg);
-void logTimestamp();
-void logConnectMake(unsigned int host, unsigned int remote);
-void logConnectRecv(unsigned int host, unsigned int remote);
-void logUpdatePrefNeighbors(unsigned int host, unsigned int* remoteArr);
-void logUpdateOptUnchokedNeighbor(unsigned int host, unsigned int remote);
-void logUnchoking(unsigned int host, unsigned int remote);
-void logChoking(unsigned int host, unsigned int remote);
-void logRecvHave(unsigned int host, unsigned int remote);
-void logRecvInterested(unsigned int host, unsigned int remote);
-void logRecvNotInterested(unsigned int host, unsigned int remote);
-void logDownloaded(unsigned int host, unsigned int remote, unsigned int piece, unsigned int total);
-void logCompletion(unsigned int host);
-
-/**  funciton prototypes */
-void initialize();
-void readCommonConfig();
-void readPeerInfoConfig();
+/* Helper Functions */
+int connectTo(int peerProcessID, PeerInfo* p_info);
 
 
 /**  main function */
 int main(int argc, char** argv) {
-    initialize();
-    
+
     if (argc == 1) {
         std::cerr << "Needs a processID number to start" << std::endl;
         exit(2);
@@ -78,87 +42,17 @@ int main(int argc, char** argv) {
     int peerProcessID = atoi(argv[1]);
     std::cout << peerProcessID << std::endl;
     
-    openLog("log_peer_" + processIDString  + ".log");
-
+    logUtils = new LogUtils(peerProcessID, "log_peer_" + processIDString + ".log");
+    configUtils = new ConfigUtils();
 
     // client.c
-    for (int i = 0; i < peerID2idx[peerProcessID]; i++) {
+    // needs to connect to all previously initialized peer process
+    //      [0, .., n-1]
+    const unsigned int index = configUtils->getPeerIndex(peerProcessID);
+    for (int i = 0; i < index; i++) {
         if (!fork()) {
-            int sockfd, numbytes;
-            char buf[MAX_DATA_SIZE];
-            struct addrinfo hints, *servinfo, *p;
-            int rv;
-            char s[INET6_ADDRSTRLEN];
-
-            memset(&hints, 0, sizeof hints);
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_STREAM;
-
-            PeerInfo* p_info = peerInfo[i];
-            if ((rv = getaddrinfo(p_info->hostname.c_str(), p_info->port.c_str(), &hints, &servinfo)) != 0) {
-                fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-                return 1;
-            }
-
-            for (p = servinfo; p != NULL; p = p->ai_next) {
-                if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-                    perror("client: socket");
-                    continue;
-                }
-
-                struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
-                // TODO - revisit this
-                void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
-                                                                (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
-
-                inet_ntop(p->ai_family, var, s, sizeof s);
-                printf("client: attempting connection to %s\n", s);
-
-                if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-                    perror("client: connect");
-                    close(sockfd);
-                    continue;
-                }
-
-                break;
-            }
-
-            if (p == NULL) {
-                fprintf(stderr, "client: failed to connect\n");
-                return 2;
-            }
-
-            struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
-            // TODO - revisit this
-            void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
-                                                            (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
-
-
-            inet_ntop(p->ai_family, var, s, sizeof s);
-            freeaddrinfo(servinfo);   
-
-            printf("client: connected to %s\n", s);
-            logConnectMake(peerProcessID, p_info->id);
-
-            int pID = htonl(peerProcessID);
-            if (send(sockfd, &pID, sizeof(pID), 0) == -1) {
-                perror("send");
-            }
-
-            while (true) {
-                numbytes = recv(sockfd, buf, MAX_DATA_SIZE - 1, 0);
-                if (numbytes == -1) { perror("recv"); break; }
-                if (numbytes == 0) { std::cout << "Server closed connection\n"; break; }
-                buf[numbytes] = '\0';
-
-                recv(sockfd, &pID, sizeof(pID), 0); 
-                pID = ntohl(pID);
-
-                printf("client: received '%s' from peerID: %d\n", buf, pID);
-            }
-
-            close(sockfd);
-            return 0;
+            // initConnection 
+            connectTo(peerProcessID, configUtils->getPeer(i));
         }
     }
 
@@ -170,11 +64,12 @@ int main(int argc, char** argv) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
+    PeerInfo* p_info = configUtils->getPeer(index);
     std::cout << "Desired port number for server: ";
-    std::cout << peerInfo[peerID2idx[peerProcessID]]->port.c_str();
+    std::cout << p_info->port.c_str();
     std::cout << std::endl;
 
-    if ((status = getaddrinfo(NULL, peerInfo[peerID2idx[peerProcessID]]->port.c_str(), &hints, &res)) != 0) {
+    if ((status = getaddrinfo(NULL, p_info->port.c_str(), &hints, &res)) != 0) {
         fprintf(stderr, "gai error: %s\n", gai_strerror(status));
         exit(100);
     }
@@ -245,7 +140,7 @@ int main(int argc, char** argv) {
         pID = ntohl(pID);
 
         printf("server: connected from '%d'\n", pID);
-        logConnectRecv(peerProcessID, (unsigned int) pID);
+        logUtils->logConnectRecv((unsigned int) pID);
 
         if (!fork()) {
             close(sockfd);
@@ -276,229 +171,84 @@ int main(int argc, char** argv) {
         close(new_fd); 
     }
 
-    closeLog();
+    logUtils->closeLog();
     
     return 0;
 }
 
-/**  function definitions */
-void initialize() {
-    readCommonConfig();
-    readPeerInfoConfig();
-}
+int connectTo(int peerProcessID, PeerInfo* p_info) {
+    int sockfd, numbytes;
+    char buf[MAX_DATA_SIZE];
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+    char s[INET6_ADDRSTRLEN];
 
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-void readCommonConfig() {
-    std::string fileName = "Common.cfg";
-    std::fstream config(fileName);
-
-    if (!config) {
-        std::cerr << "Failed to open Common.cfg" << std::endl;
-        exit(1);
+    if ((rv = getaddrinfo(p_info->hostname.c_str(), p_info->port.c_str(), &hints, &servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        return 1;
     }
 
-    std::string temp;
-    std::string value;
-    
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    numPreferredNeighbors = stoi(value);
-   
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    unchokingInterval = stoi(value);
-   
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    optimisticUnchokingInterval = stoi(value);
+    for (p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("client: socket");
+            continue;
+        }
 
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    fileName = value;
+        struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
+        // TODO - revisit this
+        void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
+                                                        (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
 
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    fileSize = stoi(value);
-   
-    getline(config, temp);
-    value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    pieceSize = stoi(value);
+        inet_ntop(p->ai_family, var, s, sizeof s);
+        printf("client: attempting connection to %s\n", s);
 
-    config.close();
-    std::cout << "Finished reading Common.cfg" << std::endl;
-}
+        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            perror("client: connect");
+            close(sockfd);
+            continue;
+        }
 
-void readPeerInfoConfig() {
-    std::string fileName = "PeerInfo.cfg";
-    std::fstream config(fileName);
-
-    if (!config) {
-        std::cerr << "Failed to open Common.cfg" << std::endl;
-        exit(1);
-    }
-    
-    std::string temp;
-    unsigned int vectIndex = 0;
-    while (getline(config, temp)) {
-        PeerInfo* peer = new PeerInfo;
-        
-        size_t idx = temp.find(' ', 0);
-        peer->id = stoi(temp.substr(0, idx));
-
-        size_t previdx = idx;
-        idx = temp.find(' ', previdx + 1);
-        peer->hostname = temp.substr(previdx + 1, idx - (previdx + 1));
-
-        previdx = idx;
-        idx = temp.find(' ', previdx + 1);
-        peer->port = temp.substr(previdx + 1, idx - (previdx + 1));
-
-        previdx = idx;
-        peer->hasCompleteFile = stoi(temp.substr(previdx + 1, 1));
-
-        peerInfo.push_back(peer);
-        peerID2idx.emplace(peer->id, vectIndex++);
+        break;
     }
 
-    config.close();
-    std::cout << "Finished reading peerInfo.cfg" << std::endl;
-}
-
-void openLog(std::string logFileName) {
-    logFile.open(logFileName, std::ios::out | std::ios::trunc);
-
-    if (!logFile.is_open()) {
-        std::cerr << "Failed to open log file: " << logFileName << std::endl;
-        exit(1);
+    if (p == NULL) {
+        fprintf(stderr, "client: failed to connect\n");
+        return 2;
     }
-}
 
-void closeLog() {
-    logFile.close();
-}
+    struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
+    // TODO - revisit this
+    void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
+                                                    (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
 
-void logMessage(std::string message) {
-    logFile << message << std::endl;
-}
 
-void logTimestamp() {
-    auto t = std::time(nullptr);
-    auto tm = *std::localtime(&t);
-    logFile << "[";
-    logFile << std::put_time(&tm, "%d-%m-%Y %H-%M-%S");
-    logFile << "]: ";
-}
+    inet_ntop(p->ai_family, var, s, sizeof s);
+    freeaddrinfo(servinfo);   
 
-void logConnectMake(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " makes a connection to Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
+    printf("client: connected to %s\n", s);
+    logUtils->logConnectMake(p_info->id);
 
-void logConnectRecv(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is connected from Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
+    int pID = htonl(peerProcessID);
+    if (send(sockfd, &pID, sizeof(pID), 0) == -1) {
+        perror("send");
+    }
 
-void logUpdatePrefNeighbors(unsigned int host, unsigned int* remoteArr) {
-    logTimestamp();
-    if (remoteArr == nullptr) {} // TODO: print a line and exit
+    while (true) {
+        numbytes = recv(sockfd, buf, MAX_DATA_SIZE - 1, 0);
+        if (numbytes == -1) { perror("recv"); break; }
+        if (numbytes == 0) { std::cout << "Server closed connection\n"; break; }
+        buf[numbytes] = '\0';
 
-    logFile << "Peer ";
-    logFile << host;
-    logFile << "has the preferred neighbors ";
-    // logFile << remoteArr; // TODO: print the array of neighbors
-    logFile << ".";
-    logFile << std::endl;
-}
+        recv(sockfd, &pID, sizeof(pID), 0); 
+        pID = ntohl(pID);
 
-void logUpdateOptUnchokedNeighbor(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has the optimistically unchoked neighbor ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
+        printf("client: received '%s' from peerID: %d\n", buf, pID);
+    }
 
-void logUnchoking(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is unchoked by Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logChoking(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " is choked by Peer ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvHave(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'have' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvInterested(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'interested' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logRecvNotInterested(unsigned int host, unsigned int remote) {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " received the 'not interested' message from ";
-    logFile << remote;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logDownloaded(unsigned int host, unsigned int remote, unsigned int piece, unsigned int total)  {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has downloaded the piece ";
-    logFile << piece;
-    logFile << " from ";
-    logFile << remote;
-    logFile << ". Now the number of pieces it has is ";
-    logFile << total;
-    logFile << ".";
-    logFile << std::endl;
-}
-
-void logCompletion(unsigned int host)  {
-    logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << " has downloaded the complete file";
-    logFile << std::endl;
+    close(sockfd);
+    return 0;
 }
