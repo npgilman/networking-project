@@ -1,6 +1,6 @@
-#include "Logger.h"
+#include "LogUtils.h"
 
-void Logger::openLog(std::string logFileName) {
+void LogUtils::openLog(std::string logFileName) {
     logFile.open(logFileName, std::ios::out | std::ios::trunc);
 
     if (!logFile.is_open()) {
@@ -9,15 +9,15 @@ void Logger::openLog(std::string logFileName) {
     }
 }
 
-void Logger::closeLog() {
+void LogUtils::closeLog() {
     logFile.close();
 }
 
-void Logger::logMessage(std::string message) {
+void LogUtils::logMessage(std::string message) {
     logFile << message << std::endl;
 }
 
-void Logger::logTimestamp() {
+void LogUtils::logTimestamp() {
     auto t = std::time(nullptr);
     auto tm = *std::localtime(&t);
     logFile << "[";
@@ -25,7 +25,7 @@ void Logger::logTimestamp() {
     logFile << "]: ";
 }
 
-void Logger::logConnectMake(unsigned int remote) {
+void LogUtils::logConnectMake(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -35,7 +35,7 @@ void Logger::logConnectMake(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logConnectRecv(unsigned int remote) {
+void LogUtils::logConnectRecv(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -45,7 +45,7 @@ void Logger::logConnectRecv(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logUpdatePrefNeighbors(unsigned int* remoteArr) {
+void LogUtils::logUpdatePrefNeighbors(unsigned int* remoteArr) {
     logTimestamp();
     if (remoteArr == nullptr) {} // TODO: print a line and exit
 
@@ -57,7 +57,7 @@ void Logger::logUpdatePrefNeighbors(unsigned int* remoteArr) {
     logFile << std::endl;
 }
 
-void Logger::logUpdateOptUnchokedNeighbor(unsigned int remote) {
+void LogUtils::logUpdateOptUnchokedNeighbor(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -67,7 +67,7 @@ void Logger::logUpdateOptUnchokedNeighbor(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logUnchoking(unsigned int remote) {
+void LogUtils::logUnchoking(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -77,7 +77,7 @@ void Logger::logUnchoking(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logChoking(unsigned int remote) {
+void LogUtils::logChoking(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -87,7 +87,7 @@ void Logger::logChoking(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logRecvHave(unsigned int remote) {
+void LogUtils::logRecvHave(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -97,7 +97,7 @@ void Logger::logRecvHave(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logRecvInterested(unsigned int remote) {
+void LogUtils::logRecvInterested(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -107,7 +107,7 @@ void Logger::logRecvInterested(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logRecvNotInterested(unsigned int remote) {
+void LogUtils::logRecvNotInterested(unsigned int remote) {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -117,7 +117,7 @@ void Logger::logRecvNotInterested(unsigned int remote) {
     logFile << std::endl;
 }
 
-void Logger::logDownloaded(unsigned int remote, unsigned int piece, unsigned int total)  {
+void LogUtils::logDownloaded(unsigned int remote, unsigned int piece, unsigned int total)  {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -131,7 +131,7 @@ void Logger::logDownloaded(unsigned int remote, unsigned int piece, unsigned int
     logFile << std::endl;
 }
 
-void Logger::logCompletion()  {
+void LogUtils::logCompletion()  {
     logTimestamp();
     logFile << "Peer ";
     logFile << host;

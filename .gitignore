@@ -1,13 +1,15 @@
+# misc
+.DS_Store
+
 # config files
-# *.cfg
+*.cfg
 
 # log files
 *.log
 
 # compilation outputs
 peerProcess
-project1
-main.o
+*.o
 
 # peer subfolders
 1001/

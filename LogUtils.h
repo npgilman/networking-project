@@ -1,9 +1,16 @@
+#include <ctime>
+#include <fstream>
+#include <iostream>
+#include <iomanip>
+#include <map>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <unistd.h>
 
-
-public class Logger {
-
+class LogUtils {
 	public:
-		Logger(int id, std::string filename) {
+		LogUtils(int id, std::string filename) {
 			this->host = id;
 			openLog(filename);
 		}
@@ -27,4 +34,4 @@ public class Logger {
 	private:
 		std::fstream logFile;
 		int host;
-}
+};
