@@ -1,5 +1,5 @@
-peerProcess: main.o LogUtils.o ConfigUtils.o
-	g++ -o peerProcess main.o LogUtils.o ConfigUtils.o
+peerProcess: main.o LogUtils.o ConfigUtils.o ConnectionManager.o
+	g++ -o peerProcess main.o LogUtils.o ConfigUtils.o ConnectionManager.o
 
 main.o: main.cpp LogUtils.h ConfigUtils.h
 	g++ -std=c++17 -c main.cpp
@@ -9,3 +9,6 @@ LogUtils.o: LogUtils.cpp LogUtils.h
 
 ConfigUtils.o: ConfigUtils.cpp ConfigUtils.h
 	g++ -std=c++17 -c ConfigUtils.cpp
+
+ConnectionManager.o: ConnectionManager.cpp ConnectionManager.h
+	g++ -std=c++17 -c ConnectionManager.cpp

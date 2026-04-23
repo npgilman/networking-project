@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string>
 #include <unistd.h>
-
-// imports from beej's guide to networkign programming
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -18,9 +16,9 @@
 // imports from defined classes
 #include "LogUtils.h"
 #include "ConfigUtils.h"
+#include "ConnectionManager.h"
 
 #define MAX_CONNECTIONS 10
-#define MAX_DATA_SIZE 100
 
 /* Utilities */
 LogUtils* logUtils = nullptr;
@@ -28,20 +26,18 @@ ConfigUtils* configUtils = nullptr;
 
 /* Helper Functions */
 int connectTo(int peerProcessID, PeerInfo* p_info);
-
+void handleIncomingConnection(int new_fd, int peerProcessID);
 
 /**  main function */
 int main(int argc, char** argv) {
-
     if (argc == 1) {
         std::cerr << "Needs a processID number to start" << std::endl;
         exit(2);
     }
 
-    std::string processIDString = std::string(argv[1]);
-    int peerProcessID = atoi(argv[1]);
-    std::cout << peerProcessID << std::endl;
-    
+    int peerID = std::atoi(argv[1]);
+    std::string peerIDString = argv[1];
+
     logUtils = new LogUtils(peerProcessID, "log_peer_" + processIDString + ".log");
     configUtils = new ConfigUtils();
 
@@ -49,6 +45,7 @@ int main(int argc, char** argv) {
     // needs to connect to all previously initialized peer process
     //      [0, .., n-1]
     const unsigned int index = configUtils->getPeerIndex(peerProcessID);
+    PeerInfo* p_info = configUtils->getPeer(index);
     for (int i = 0; i < index; i++) {
         if (!fork()) {
             // initConnection 
@@ -58,16 +55,12 @@ int main(int argc, char** argv) {
 
     // addr info variables
     int status;
-    struct addrinfo hints, *res;
+    struct addrinfo hints, *res, *p;
+
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
-
-    PeerInfo* p_info = configUtils->getPeer(index);
-    std::cout << "Desired port number for server: ";
-    std::cout << p_info->port.c_str();
-    std::cout << std::endl;
 
     if ((status = getaddrinfo(NULL, p_info->port.c_str(), &hints, &res)) != 0) {
         fprintf(stderr, "gai error: %s\n", gai_strerror(status));
@@ -75,15 +68,10 @@ int main(int argc, char** argv) {
     }
     
     // socket variables
-    int sockfd, new_fd;
-    socklen_t sin_size;
-    // struct sigaction sa;
+    int sockfd;
     int yes = 1;
-    int rv;
 
     // bind to first possible network address
-    struct addrinfo *p;
-    char ipstr[INET6_ADDRSTRLEN];
     for (p = res; p != NULL; p = p->ai_next) {
         if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("server:socket");
@@ -101,9 +89,8 @@ int main(int argc, char** argv) {
 
         break;
 
-        // inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-        // printf("\t%s: %s\n", ipver, ipstr);
     }
+
     freeaddrinfo(res);
 
     if (p == NULL) {
@@ -118,7 +105,10 @@ int main(int argc, char** argv) {
 
     // TODO : Need code to clean up zombie threads
     struct sockaddr_storage their_addr;
-    while (1) {
+    char ipstr[INET6_ADDRSTRLEN];
+    socklen_t sin_size;
+
+    while (true) {
         sin_size = sizeof their_addr;
         new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
         if (new_fd == -1) {
@@ -127,45 +117,19 @@ int main(int argc, char** argv) {
         }
 
         struct sockaddr *temp = (struct sockaddr *)&their_addr;
-        // TODO - revisit this
-        void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
-                                                        (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
+        void *var = (temp->sa_family == AF_INET)
+                        ? (void*) &(((struct sockaddr_in*)temp)->sin_addr)
+                        : (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
         
         inet_ntop(their_addr.ss_family, var, ipstr, sizeof ipstr);
         printf("server: got connection from %s\n", ipstr);
-
-        // TODO - Need to receive a message with pID of connector
-        int pID;
-        recv(new_fd, &pID, sizeof pID, 0);
-        pID = ntohl(pID);
 
         printf("server: connected from '%d'\n", pID);
         logUtils->logConnectRecv((unsigned int) pID);
 
         if (!fork()) {
             close(sockfd);
-
-            while (true) {
-                if (send(new_fd, "Hello, World!", 13, 0) == -1) {
-                    perror("send");
-                }
-                pID = htonl(peerProcessID);
-                if (send(new_fd, &pID, sizeof(pID), 0) == -1) {
-                    perror("send");
-                }
-                sleep(5);
-            }
-            int numbytes;
-            char buf[MAX_DATA_SIZE];
-            if ((numbytes = recv(new_fd, buf, MAX_DATA_SIZE - 1, 0)) == -1) {
-                perror("recv");
-                exit(1);
-            }
-
-            buf[numbytes] = '\0';
-            printf("server: received '%s'\n", buf);
-
-            close(new_fd);
+            handleIncomingConnection(new_fd, peerProcessID);
             exit(0);
         }
         close(new_fd); 
@@ -176,9 +140,25 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+void handleIncomingConnection(int new_fd, int peerProcessID) {
+    ConnectionManager conn(new_fd);
+
+    unsigned int remotePeerID;
+
+    if (!conn.receiveHandshakeMessage(remotePeerID)) {
+        close(new_fd);
+        return;
+    }
+
+    if (!conn.sendHandshakeMessage(peerID)) {
+        close(new_fd);
+        return;
+    }
+
+}
+
 int connectTo(int peerProcessID, PeerInfo* p_info) {
-    int sockfd, numbytes;
-    char buf[MAX_DATA_SIZE];
+    int sockfd;
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -198,14 +178,6 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
             continue;
         }
 
-        struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
-        // TODO - revisit this
-        void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
-                                                        (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
-
-        inet_ntop(p->ai_family, var, s, sizeof s);
-        printf("client: attempting connection to %s\n", s);
-
         if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
             perror("client: connect");
             close(sockfd);
@@ -217,70 +189,47 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     if (p == NULL) {
         fprintf(stderr, "client: failed to connect\n");
+        freeaddrinfo(servinfo);
         return 2;
     }
 
-    struct sockaddr *temp = (struct sockaddr *)p->ai_addr;
-    // TODO - revisit this
-    void *var = (temp->sa_family == AF_INET) ? (void*) &(((struct sockaddr_in*)temp)->sin_addr) : 
-                                                    (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
+    inet_ntop(
+        p->ai_family,
+        (p->ai_family == AF_INET)
+            ? (void*)&(((struct sockaddr_in*)p->ai_addr)->sin_addr)
+            : (void*)&(((struct sockaddr_in6*)p->ai_addr)->sin6_addr),
+        s, sizeof s
+    );
 
+    freeaddrinfo(servinfo);
 
-    inet_ntop(p->ai_family, var, s, sizeof s);
-    freeaddrinfo(servinfo);   
+    std::cout << "Connected to " << s << "\n";
 
-    printf("client: connected to %s\n", s);
-    logUtils->logConnectMake(p_info->id);
+    ConnectionManager conn(sockfd);
 
-    int pID = htonl(peerProcessID);
-    if (send(sockfd, &pID, sizeof(pID), 0) == -1) {
-        perror("send");
+    if (!conn.sendHandshakeMessage(peerProcessID)) {
+        close(sockfd);
+        return 3;
     }
 
-    while (true) {
-        numbytes = recv(sockfd, buf, MAX_DATA_SIZE - 1, 0);
-        if (numbytes == -1) { perror("recv"); break; }
-        if (numbytes == 0) { std::cout << "Server closed connection\n"; break; }
-        buf[numbytes] = '\0';
+    unsigned int remotePeerID;
+    if (!conn.receiveHandshakeMessage(remotePeerID)) {
+        close(sockfd);
+        return 4;
+    }
 
-        recv(sockfd, &pID, sizeof(pID), 0); 
-        pID = ntohl(pID);
+    std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 
-        printf("client: received '%s' from peerID: %d\n", buf, pID);
+    conn.sendMessage(MessageType::INTERESTED, {});
+
+    MessageType type;
+    std::vector<char> payload;
+    while (conn.receiveMessage(type, payload)) {
+        std::cout << "Client received message type "
+                  << static_cast<int>(type)
+                  << " payload size " << payload.size() << "\n";
     }
 
     close(sockfd);
     return 0;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
