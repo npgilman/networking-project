@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     // socket variables
     int sockfd, new_fd;
     socklen_t sin_size;
-    struct sigaction sa;
+    // struct sigaction sa;
     int yes = 1;
     int rv;
 
@@ -252,3 +252,35 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
     close(sockfd);
     return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
