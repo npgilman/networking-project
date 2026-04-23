@@ -120,7 +120,6 @@ int main(int argc, char** argv) {
                         : (void*) &(((struct sockaddr_in6*)temp)->sin6_addr);
         
         inet_ntop(their_addr.ss_family, var, ipstr, sizeof ipstr);
-        printf("server: got connection from %s\n", ipstr);
 
         if (!fork()) {
             close(sockfd);
@@ -144,13 +143,13 @@ void handleIncomingConnection(int new_fd, int peerProcessID) {
         return;
     }
 
-    printf("server: connected from '%d'\n", remotePeerID);
-    logUtils->logConnectRecv((unsigned int) remotePeerID);
-
     if (!conn.sendHandshakeMessage(peerProcessID)) {
         close(new_fd);
         return;
     }
+
+    logUtils->logConnectRecv((unsigned int) remotePeerID);
+    std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 
     MessageType type;
     std::vector<char> payload;
@@ -212,8 +211,6 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     freeaddrinfo(servinfo);
 
-    std::cout << "Connected to " << s << "\n";
-
     ConnectionManager conn(sockfd);
 
     if (!conn.sendHandshakeMessage(peerProcessID)) {
@@ -232,7 +229,7 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 
-    conn.sendMessage(MessageType::INTERESTED, {});
+    // conn.sendMessage(MessageType::INTERESTED, {});
 
     MessageType type;
     std::vector<char> payload;
