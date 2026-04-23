@@ -33,36 +33,39 @@ bool ConnectionManager::sendHandshakeMessage(int peerID) {
 
 	if (!sendAll(&hs, sizeof(hs))) {
 		perror("Sending handshake");
-		return;
+		return false;
 	}
+
+	return true;
 }
 
 bool ConnectionManager::receiveHandshakeMessage(int& peerID) {
 	msg_Handshake hs(0);
 	int numbytes;
 
-	if (!recvAll(&hs, sizeof(hs))) {
+	if (!receiveAll(&hs, sizeof(hs))) {
         perror("Receiving handshake");
-        return;
+        return false;
     } 
 
 	if (std::memcmp(hs.header, HANDSHAKE_HEADER, 18) != 0) {
-		perror("Invalid Handshake Header")
-		return;
+		perror("Invalid Handshake Header");
+		return false;
     }
 
     for (int i = 0; i < 10; i++) {
     	if (hs.zeroBits[i] != 0) {
     		// fail
-    		perror("Zero bits")
-    		return;
+    		perror("Zero bits");
+    		return false;
     	}
     }
 
     peerID = ntohl(hs.peerId);
+    return true;
 }
 
-bool ConnectionManager::sendMessage(MessageType type, std::vector<char>& payload) {
+bool ConnectionManager::sendMessage(MessageType type, const std::vector<char>& payload) {
 	uint32_t length = 1 + payload.size();
 	uint32_t net_length = htonl(length);
 
@@ -84,7 +87,7 @@ bool ConnectionManager::sendMessage(MessageType type, std::vector<char>& payload
 bool ConnectionManager::receiveMessage(MessageType& type, std::vector<char>& payload) {
     uint32_t net_length;
 
-    if (!recvAll(&net_length, 4)) {
+    if (!receiveAll(&net_length, 4)) {
         perror("receiveMessage length");
         return false;
     }
@@ -96,7 +99,7 @@ bool ConnectionManager::receiveMessage(MessageType& type, std::vector<char>& pay
     }
 
     std::vector<char> buf(length);
-    if (!recvAll(buf.data(), length)) {
+    if (!receiveAll(buf.data(), length)) {
         perror("receiveMessage body");
         return false;
     }

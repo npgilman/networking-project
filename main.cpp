@@ -35,10 +35,10 @@ int main(int argc, char** argv) {
         exit(2);
     }
 
-    int peerID = std::atoi(argv[1]);
-    std::string peerIDString = argv[1];
+    int peerProcessID = std::atoi(argv[1]);
+    std::string peerProcessIDString = argv[1];
 
-    logUtils = new LogUtils(peerProcessID, "log_peer_" + processIDString + ".log");
+    logUtils = new LogUtils(peerProcessID, "log_peer_" + peerProcessIDString + ".log");
     configUtils = new ConfigUtils();
 
     // client.c
@@ -106,11 +106,9 @@ int main(int argc, char** argv) {
     // TODO : Need code to clean up zombie threads
     struct sockaddr_storage their_addr;
     char ipstr[INET6_ADDRSTRLEN];
-    socklen_t sin_size;
-
     while (true) {
-        sin_size = sizeof their_addr;
-        new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+        socklen_t sin_size = sizeof their_addr;
+        int new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
         if (new_fd == -1) {
             perror("accept");
             continue;
@@ -123,9 +121,6 @@ int main(int argc, char** argv) {
         
         inet_ntop(their_addr.ss_family, var, ipstr, sizeof ipstr);
         printf("server: got connection from %s\n", ipstr);
-
-        printf("server: connected from '%d'\n", pID);
-        logUtils->logConnectRecv((unsigned int) pID);
 
         if (!fork()) {
             close(sockfd);
@@ -143,17 +138,31 @@ int main(int argc, char** argv) {
 void handleIncomingConnection(int new_fd, int peerProcessID) {
     ConnectionManager conn(new_fd);
 
-    unsigned int remotePeerID;
-
+    int remotePeerID;
     if (!conn.receiveHandshakeMessage(remotePeerID)) {
         close(new_fd);
         return;
     }
 
-    if (!conn.sendHandshakeMessage(peerID)) {
+    printf("server: connected from '%d'\n", remotePeerID);
+    logUtils->logConnectRecv((unsigned int) remotePeerID);
+
+    if (!conn.sendHandshakeMessage(peerProcessID)) {
         close(new_fd);
         return;
     }
+
+    MessageType type;
+    std::vector<char> payload;
+
+    while (conn.receiveMessage(type, payload)) {
+        std::cout << "server: received message type "
+                  << static_cast<int>(type)
+                  << " from peer " << remotePeerID
+                  << " payload size " << payload.size() << "\n";
+    }
+
+    close(new_fd);
 
 }
 
@@ -209,14 +218,17 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     if (!conn.sendHandshakeMessage(peerProcessID)) {
         close(sockfd);
+        exit(3);
         return 3;
     }
 
-    unsigned int remotePeerID;
+    int remotePeerID;
     if (!conn.receiveHandshakeMessage(remotePeerID)) {
         close(sockfd);
+        exit(4);
         return 4;
     }
+    logUtils->logConnectMake(remotePeerID);
 
     std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 

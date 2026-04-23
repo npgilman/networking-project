@@ -28,7 +28,7 @@ class ConnectionManager {
 
 		bool sendHandshakeMessage(int peerID);
 		bool receiveHandshakeMessage(int& peerID);
-		bool sendMessage(MessageType type, std::vector<char>& payload);
+		bool sendMessage(MessageType type, const std::vector<char>& payload);
 		bool receiveMessage(MessageType& type, std::vector<char>& payload);
 
 	private:
@@ -45,7 +45,7 @@ class ConnectionManager {
 			}
 		};
 
-		static constexpr char HANDSHAKE_HEADER[18] = "P2PFILESHARINGPROJ"; // 18 bytes
+		static constexpr char HANDSHAKE_HEADER[] = "P2PFILESHARINGPROJ"; // 18 bytes
 		static constexpr unsigned int MAX_CONNECTIONS = 10;
 		static constexpr unsigned int MAX_DATA_SIZE = 100;
 
