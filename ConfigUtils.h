@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 struct PeerInfo {
     unsigned int id;
