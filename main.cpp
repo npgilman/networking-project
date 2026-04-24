@@ -12,21 +12,30 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <thread>
+#include <mutex>
 
 // imports from defined classes
 #include "LogUtils.h"
 #include "ConfigUtils.h"
 #include "ConnectionManager.h"
+#include "SessionManager.h"
 
 #define MAX_CONNECTIONS 10
 
 /* Utilities */
 LogUtils* logUtils = nullptr;
 ConfigUtils* configUtils = nullptr;
+SessionManager* sessionManager = nullptr;
+
+/* Thread Utilities */
+std:: mutex thread_mutex;
+std::vector<std::thread> threads;
 
 /* Helper Functions */
 int connectTo(int peerProcessID, PeerInfo* p_info);
 void handleIncomingConnection(int new_fd, int peerProcessID);
+void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager& conn) {
 
 /**  main function */
 int main(int argc, char** argv) {
@@ -40,6 +49,7 @@ int main(int argc, char** argv) {
 
     logUtils = new LogUtils(peerProcessID, "log_peer_" + peerProcessIDString + ".log");
     configUtils = new ConfigUtils();
+    sessionManager = new SessionManager(peerProcessID, *configUtils);
 
     // client.c
     // needs to connect to all previously initialized peer process
@@ -47,10 +57,11 @@ int main(int argc, char** argv) {
     const unsigned int index = configUtils->getPeerIndex(peerProcessID);
     PeerInfo* p_info = configUtils->getPeer(index);
     for (int i = 0; i < index; i++) {
-        if (!fork()) {
-            // initConnection 
-            connectTo(peerProcessID, configUtils->getPeer(i));
-        }
+        PeerInfo* neighbor = configUtils->getPeer(i);
+        std::lock_guard<std::mutex> lock(thread_mutex);
+        threads.emplace_back([peerProcessID, neighbor]() {
+            connectTo(peerProcessID, neighbor);
+        });
     }
 
     // addr info variables
@@ -121,16 +132,21 @@ int main(int argc, char** argv) {
         
         inet_ntop(their_addr.ss_family, var, ipstr, sizeof ipstr);
 
-        if (!fork()) {
-            close(sockfd);
+        std::lock_guard<std::mutex> lock(thread_mutex);
+        threads.emplace_back([new_fd, peerProcessID](){
             handleIncomingConnection(new_fd, peerProcessID);
-            exit(0);
-        }
-        close(new_fd); 
+        });
     }
 
     logUtils->closeLog();
     
+    std::lock_guard<std::mutex> lock(thread_mutex);
+    for (std::thread& t : threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
     return 0;
 }
 
@@ -151,14 +167,45 @@ void handleIncomingConnection(int new_fd, int peerProcessID) {
     logUtils->logConnectRecv((unsigned int) remotePeerID);
     std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 
+    if (sessionManager->hasAnyPieces()) {
+        std::vector<uint8_t> bitfield = sessionManager->myBitfield();
+        std::vector<char> payload(bitfield.begin(), bitfield.end());
+        if (!conn.sendMessage(MessageType::BITFIELD, payload)) {
+            close(new_fd);
+            return;
+        }
+    }
+
     MessageType type;
     std::vector<char> payload;
+    if (!conn.receiveMessage(type, payload)) {
+        std::cout << "error from " << remotePeerID << std::endl;
+        close(new_fd);
+        return;
+    }
 
+    if (type == MessageType::BITFIELD) {
+        std::cout << "bitfield from " << remotePeerID << std::endl;
+        std::vector<uint8_t> incoming_bitfield(payload.begin(), payload.end());
+        sessionManager->addNeighbor(remotePeerID, incoming_bitfield);
+        sessionManager->setNeighborFd(remotePeerID, new_fd);
+
+        if (sessionManager->isInteresting(incoming_bitfield)) {
+            sessionManager->setInterested(remotePeerID);
+            conn.sendMessage(MessageType::INTERESTED, {});
+        } else {
+            sessionManager->setUninterested(remotePeerID);
+            conn.sendMessage(MessageType::NOT_INTERESTED, {});
+        }
+    } else {
+        std::cout << " no bitfield from " << remotePeerID << std::endl;
+        sessionManager->addNeighbor(remotePeerID, std::vector<uint8_t>((configUtils->getNumPieces()+7)/8, 0x00));
+        conn.sendMessage(MessageType::NOT_INTERESTED, {}); 
+    }
+
+    // Main message loop.
     while (conn.receiveMessage(type, payload)) {
-        std::cout << "server: received message type "
-                  << static_cast<int>(type)
-                  << " from peer " << remotePeerID
-                  << " payload size " << payload.size() << "\n";
+        handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
 
     close(new_fd);
@@ -215,30 +262,170 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     if (!conn.sendHandshakeMessage(peerProcessID)) {
         close(sockfd);
-        exit(3);
         return 3;
     }
 
     int remotePeerID;
     if (!conn.receiveHandshakeMessage(remotePeerID)) {
         close(sockfd);
-        exit(4);
         return 4;
     }
-    logUtils->logConnectMake(remotePeerID);
 
+    logUtils->logConnectMake(remotePeerID);
     std::cout << "Handshake complete with peer " << remotePeerID << "\n";
 
-    // conn.sendMessage(MessageType::INTERESTED, {});
+    if (sessionManager->hasAnyPieces()) {
+        std::vector<uint8_t> bitfield = sessionManager->myBitfield();
+        std::vector<char> payload(bitfield.begin(), bitfield.end());
+        if (!conn.sendMessage(MessageType::BITFIELD, payload)) {
+            close(sockfd);
+            return 5;
+        }
+    }
+
 
     MessageType type;
     std::vector<char> payload;
+    if (!conn.receiveMessage(type, payload)) {
+        close(sockfd);
+        return 6;
+    }
+
+    if (type == MessageType::BITFIELD) {
+        std::cout << "bitfield from " << remotePeerID << std::endl;
+        std::vector<uint8_t> incoming_bitfield(payload.begin(), payload.end());
+        sessionManager->addNeighbor(remotePeerID, incoming_bitfield);
+        sessionManager->setNeighborFd(remotePeerID, sockfd);
+
+        if (sessionManager->isInteresting(incoming_bitfield)) {
+            sessionManager->setInterested(remotePeerID);
+            conn.sendMessage(MessageType::INTERESTED, {});
+        } else {
+            sessionManager->setUninterested(remotePeerID);
+            conn.sendMessage(MessageType::NOT_INTERESTED, {});
+        }
+    } else {
+        std::cout << "no bitfield from " << remotePeerID << std::endl;
+        sessionManager->addNeighbor(remotePeerID, std::vector<uint8_t>((configUtils->getNumPieces()+7)/8, 0x00));
+        conn.sendMessage(MessageType::NOT_INTERESTED, {}); 
+    }
+
     while (conn.receiveMessage(type, payload)) {
-        std::cout << "Client received message type "
-                  << static_cast<int>(type)
-                  << " payload size " << payload.size() << "\n";
+        handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
 
     close(sockfd);
     return 0;
+}
+
+void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager& conn) {
+    switch (type) {
+        case MessageType::CHOKE:
+            {
+                sessionManager->setChoked(remotePeerID);
+                logUtils->logChoking(remotePeerID);
+            }
+            break;
+        case MessageType::UNCHOKE:
+            {
+                sessionManager->setUnchoked(remotePeerID);
+                logUtils->logUnchoking(remotePeerID);
+
+                PeerState peer_state = sessionManager->getNeighborState(remotePeerID);
+                int next_piece_id = sessionManager->selectRandom(peer_state.bitfield);
+                if (next_piece_id >= 0) {
+                    uint32_t next_piece_id = htonl((uint32_t) next_piece_id);
+                    std::vector<char> requestMessage_Payload(4);
+                    std::memcpy(reqPayload.data(), &next_piece_id, 4);
+                    conn.sendMessage(MessageType::REQUEST, reqPayload);
+                }
+            }
+            break;
+        case MessageType::INTERESTED:
+            {
+                sessionManager->setInterested(remotePeerID);
+                logUtils->logRecvInterested(remotePeerID);
+            }
+            break;
+        case MessageType::NOT_INTERESTED:
+            {
+                sessionManager->setUninterested(remotePeerID);
+                logUtils->logRecvNotInterested(remotePeerID);
+            }
+            break;
+        case MessageType::HAVE:
+            {
+                sessionManager->setChoked(remotePeerID);
+                logUtils->logRecvHave(remotePeerID);
+
+                uint32_t piece_id;
+                std::memcpy(&piece_id, payload.data(), 4);
+                piece_id = ntohl(piece_id);
+
+                sessionManager->updateNeighborPiece(remotePeerID, piece_id);
+
+                bool isInterested = sessionManager->isInteresting(sessionManager->getNeighborState(remotePeerID).bitfield);
+                if (isInterested) {
+                    sessionManager->setInterested(remotePeerID);
+                    conn.sendMessage(MessageType::INTERESTED, {});
+                } else {
+                    sessionManager->setUninterested(remotePeerID);
+                    conn.sendMessage(MessageType::NOT_INTERESTED, {});
+                }
+            }
+            break;
+        case MessageType::REQUEST:
+            {
+                sessionManager->setChoked(remotePeerID);
+                uint32_t piece_id;
+                std::memcpy(&piece_id, payload.data(), 4);
+                piece_id = ntohl(piece_id);
+
+                if (sessionManager->getNeighborState(remotePeerID).remote_choked)
+                    break;
+
+                std::vector<char> piece_data = sessionManager->readPiece(piece_id);
+                if (piece_data.empty())
+                    break;
+
+                std::vector<char> pieceMessage_Payload(4 + piece_data.size());
+                std::memcpy(piecePayload.data(), payload.data(), 4);
+                std::memcpy(piecePayload.data() + 4, piece_data.data(), piece_data.size());
+                conn.sendMessage(MessageType::PIECE, piecePayload);
+            }
+            break;
+        case MessageType::PIECE:
+            {
+                sessionManager->setChoked(remotePeerID);
+                uint32_t piece_id;
+                std::memcpy(&piece_id, payload.data(), 4);
+                piece_id = ntohl(piece_id);
+
+                std::vector<char> data(payload.begin() + 4, payload.end());
+                sessionManager->recordBytesReceived(remotePeerID, (unsigned int)data.size());
+                sessionManager->storePiece(piece_id, data);
+
+                logUtils->logDownloaded(remotePeerID, piece_id, sessionManager->countPieces());
+
+                std::vector<char> haveMessage_Payload(4);
+                std::memcpy(haveMessage_Payload.data(), payload.data(), 4);
+                sessionManager->broadcastHave(piece_id);
+
+                if (sessionManager->hasAllPieces())
+                    logUtils->logCompletion();
+
+                PeerState peer_state = sessionManager->getNeighborState(remotePeerID);
+                if (!peer_state.choked) {
+                    int next_piece_id = sessionManager->selectRandom(peer_state.bitfield);
+                    if (next_piece_id >= 0) {
+                        uint32_t next_piece_id = htonl((uint32_t) next_piece_id);
+                        std::vector<char> requestMessage_Payload(4);
+                        std::memcpy(reqPayload.data(), &next_piece_id, 4);
+                        conn.sendMessage(MessageType::REQUEST, reqPayload);
+                    }
+                }
+
+            }
+            break;
+    }
 }

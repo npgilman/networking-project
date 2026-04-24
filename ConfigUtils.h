@@ -28,6 +28,22 @@ class ConfigUtils {
 		PeerInfo* getPeer(int i);
 		unsigned int getPeerIndex(unsigned int peerID);
 
+		unsigned int getFileSize() const {
+			return fileSize;
+		}
+		unsigned int getPieceSize() const {
+			return pieceSize;
+		}
+		unsigned int getNumPieces() const {
+			return (fileSize + pieceSize - 1) / pieceSize;
+		}
+		bool hasCompleteFile(unsigned int peer_id) const {
+			return peerInfo[peerID2idx.at(peer_id)]->hasCompleteFile;
+		}
+		// void setComplete(unsigned int peer_id) {
+		// 	peerInfo[peerID2idx[peer_id]]->hasCompleteFile = true;
+		// }
+
 	private:
 		void readCommonConfig();
 		void readPeerInfoConfig();
