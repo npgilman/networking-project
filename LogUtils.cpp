@@ -1,6 +1,7 @@
 #include "LogUtils.h"
 
 void LogUtils::openLog(std::string logFileName) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logFile.open(logFileName, std::ios::out | std::ios::trunc);
 
     if (!logFile.is_open()) {
@@ -10,6 +11,7 @@ void LogUtils::openLog(std::string logFileName) {
 }
 
 void LogUtils::closeLog() {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logFile.close();
 }
 
@@ -26,6 +28,7 @@ void LogUtils::logTimestamp() {
 }
 
 void LogUtils::logConnectMake(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -36,6 +39,7 @@ void LogUtils::logConnectMake(unsigned int remote) {
 }
 
 void LogUtils::logConnectRecv(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -45,19 +49,22 @@ void LogUtils::logConnectRecv(unsigned int remote) {
     logFile << std::endl;
 }
 
-void LogUtils::logUpdatePrefNeighbors(unsigned int* remoteArr) {
+void LogUtils::logUpdatePrefNeighbors(const std::vector<unsigned int>& neighbors) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
-    if (remoteArr == nullptr) {} // TODO: print a line and exit
-
     logFile << "Peer ";
     logFile << host;
     logFile << "has the preferred neighbors ";
-    // logFile << remoteArr; // TODO: print the array of neighbors
+    for (unsigned int i = 0; i < neighbors.size(); ++i) {
+        if (i > 0) logFile << ", ";
+        logFile << neighbors[i];
+    }
     logFile << ".";
     logFile << std::endl;
 }
 
 void LogUtils::logUpdateOptUnchokedNeighbor(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -68,6 +75,7 @@ void LogUtils::logUpdateOptUnchokedNeighbor(unsigned int remote) {
 }
 
 void LogUtils::logUnchoking(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -78,6 +86,7 @@ void LogUtils::logUnchoking(unsigned int remote) {
 }
 
 void LogUtils::logChoking(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -87,17 +96,21 @@ void LogUtils::logChoking(unsigned int remote) {
     logFile << std::endl;
 }
 
-void LogUtils::logRecvHave(unsigned int remote) {
+void LogUtils::logRecvHave(unsigned int remote, unsigned int piece_id) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
     logFile << " received the 'have' message from ";
     logFile << remote;
+    logFile << " for the piece ";
+    logFile << piece_id;
     logFile << ".";
     logFile << std::endl;
 }
 
 void LogUtils::logRecvInterested(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -108,6 +121,7 @@ void LogUtils::logRecvInterested(unsigned int remote) {
 }
 
 void LogUtils::logRecvNotInterested(unsigned int remote) {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -118,6 +132,7 @@ void LogUtils::logRecvNotInterested(unsigned int remote) {
 }
 
 void LogUtils::logDownloaded(unsigned int remote, unsigned int piece, unsigned int total)  {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
@@ -132,6 +147,7 @@ void LogUtils::logDownloaded(unsigned int remote, unsigned int piece, unsigned i
 }
 
 void LogUtils::logCompletion()  {
+    std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
