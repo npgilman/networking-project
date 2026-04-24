@@ -25,7 +25,7 @@ void SessionManager::initBitfield() {
 }
 
 void SessionManager::openFile() {
-	std::string filePath = std::to_string(peerID) + "/" + "thefile";
+	std::string filePath = std::to_string(peerID) + "/" + configUtils.getFileName();
 
 	bool hasFile = configUtils.hasCompleteFile(peerID);
 	if (hasFile) {
@@ -198,6 +198,10 @@ std::vector<char> SessionManager::readPiece(unsigned int piece_id) {
 
 bool SessionManager::allPeersComplete() {
 	std::lock_guard<std::mutex> lock(peer_mutex);
+
+    if (neighbors.size() < (configUtils.getNumPeers() - 1))
+    	return false;	
+
 	unsigned int numPieces = configUtils.getNumPieces();
 	unsigned int numBytes = (numPieces + 7) / 8;
 
@@ -222,20 +226,29 @@ bool SessionManager::allPeersComplete() {
 }
 
 void SessionManager::applyChoking(const std::vector<int>& preferred) {
-	std::lock_guard<std::mutex> lock(peer_mutex);
 
 	std::set<int> preferred_neighbors_set(preferred.begin(), preferred.end());
-	for (auto& pair : neighbors) {
-		bool bChoke = (preferred_neighbors_set.find(pair.first) == preferred_neighbors_set.end()) && (opt_neighbor_id != pair.first);
 
-		MessageType message_type;
-		if (bChoke && !pair.second.remote_choked) {
-			pair.second.remote_choked = true;
-			pair.second.conn->sendMessage(MessageType::CHOKE, {});
-		} else if (!bChoke && pair.second.remote_choked) {
-			pair.second.remote_choked = false;
-			pair.second.conn->sendMessage(MessageType::UNCHOKE, {});
+    std::vector<std::pair<ConnectionManager*, MessageType>> toSend;
+    {
+        std::lock_guard<std::mutex> lock(peer_mutex);
+		for (auto& pair : neighbors) {
+			bool bChoke = (preferred_neighbors_set.find(pair.first) == preferred_neighbors_set.end()) && (opt_neighbor_id != pair.first);
+
+			MessageType message_type;
+			if (pair.second.conn == nullptr) continue;
+			if (bChoke && !pair.second.remote_choked) {
+				pair.second.remote_choked = true;
+				pair.second.conn->sendMessage(MessageType::CHOKE, {});
+			} else if (!bChoke && pair.second.remote_choked) {
+				pair.second.remote_choked = false;
+				pair.second.conn->sendMessage(MessageType::UNCHOKE, {});
+			}
 		}
+	}
+
+	for (auto& pair : toSend) {
+		pair.first->sendMessage(pair.second, {});
 	}
 }
 
@@ -260,15 +273,20 @@ unsigned int SessionManager::countPieces() {
 }
 
 void SessionManager::broadcastHave(int piece_id) {
-	std::lock_guard<std::mutex> lock(peer_mutex);
-
 	uint32_t network_piece_id = htonl(piece_id);
 	std::vector<char> payload(4);
 	std::memcpy(payload.data(), &network_piece_id, 4);
 
-	for (auto& pair : neighbors) {
-		pair.second.conn->sendMessage(MessageType::HAVE, payload);
-	}
+	std::vector<ConnectionManager*> conns;
+    {
+        std::lock_guard<std::mutex> lock(peer_mutex);
+        for (auto& pair : neighbors)
+            if (pair.second.conn != nullptr)
+                conns.push_back(pair.second.conn);
+    }
+
+    for (auto* conn : conns)
+        conn->sendMessage(MessageType::HAVE, payload);
 }
 
 std::vector<std::pair<int, double>> SessionManager::getInterestedNeighbors() {
@@ -339,4 +357,20 @@ void SessionManager::setOptimisticNeighbor(int chosen_neighbor_id) {
 void SessionManager::cancelPendingRequests() {
 	std::lock_guard<std::mutex> lock(peer_mutex);
 	requestedPieces.clear();
+}
+
+void SessionManager::broadcastNotInterested() {
+    std::vector<ConnectionManager*> conns;
+    {
+	    std::lock_guard<std::mutex> lock(peer_mutex);
+	    for (auto& pair : neighbors) {
+	    	pair.second.interested = false;
+	    	if (pair.second.conn != nullptr) {
+	    		pair.second.conn->sendMessage(MessageType::NOT_INTERESTED, {});
+	    	}
+	    }
+    }
+    for (auto* conn : conns) {
+    	conn->sendMessage(MessageType::NOT_INTERESTED, {});
+    }
 }

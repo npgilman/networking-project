@@ -34,7 +34,7 @@ void ConfigUtils::readCommonConfig() {
 
     getline(config, temp);
     value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
-    fileName = value;
+    fileNameValue = value;
 
     getline(config, temp);
     value = temp.substr(temp.find(' ', 0) + 1, temp.length() - 1);
