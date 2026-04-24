@@ -31,6 +31,9 @@ class ConfigUtils {
 		unsigned int getFileSize() const {
 			return fileSize;
 		}
+		std::string getFileName() const {
+			return fileNameValue;
+		}
 		unsigned int getPieceSize() const {
 			return pieceSize;
 		}
@@ -67,6 +70,7 @@ class ConfigUtils {
 		unsigned int unchokingInterval = 999999;
 		unsigned int optimisticUnchokingInterval = 999999; 
 		unsigned int fileSize;
+		std::string fileNameValue;
 		unsigned int pieceSize;
 
 		/* PeerInfo.cfg vars */

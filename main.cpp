@@ -33,11 +33,18 @@ SessionManager* sessionManager = nullptr;
 std:: mutex thread_mutex;
 std::vector<std::thread> threads;
 std::atomic<bool> running{true};
+int listenSockfd = -1;
+void triggerShutdown() {
+    running = false;
+    if (listenSockfd >= 0) {
+        shutdown(listenSockfd, SHUT_RDWR);
+    }
+}
 
 /* Helper Functions */
 int connectTo(int peerProcessID, PeerInfo* p_info);
 void handleIncomingConnection(int new_fd, int peerProcessID);
-void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager& conn);
+void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager* conn);
 void runUnchokeAlgorithm(int peerProcessID);
 void runOptimisticUnchokeAlgorithm(int peerProcessID);
 
@@ -139,6 +146,7 @@ int main(int argc, char** argv) {
         perror("listen");
         exit(1);
     }
+    listenSockfd = sockfd;
 
 
     // TODO : Need code to clean up zombie threads
@@ -178,15 +186,15 @@ int main(int argc, char** argv) {
 }
 
 void handleIncomingConnection(int new_fd, int peerProcessID) {
-    ConnectionManager conn(new_fd);
+    ConnectionManager* conn = new ConnectionManager(new_fd);
 
     int remotePeerID;
-    if (!conn.receiveHandshakeMessage(remotePeerID)) {
+    if (!conn->receiveHandshakeMessage(remotePeerID)) {
         close(new_fd);
         return;
     }
 
-    if (!conn.sendHandshakeMessage(peerProcessID)) {
+    if (!conn->sendHandshakeMessage(peerProcessID)) {
         close(new_fd);
         return;
     }
@@ -197,7 +205,7 @@ void handleIncomingConnection(int new_fd, int peerProcessID) {
     if (sessionManager->hasAnyPieces()) {
         std::vector<uint8_t> bitfield = sessionManager->myBitfield();
         std::vector<char> payload(bitfield.begin(), bitfield.end());
-        if (!conn.sendMessage(MessageType::BITFIELD, payload)) {
+        if (!conn->sendMessage(MessageType::BITFIELD, payload)) {
             close(new_fd);
             return;
         }
@@ -205,7 +213,7 @@ void handleIncomingConnection(int new_fd, int peerProcessID) {
 
     MessageType type;
     std::vector<char> payload;
-    if (!conn.receiveMessage(type, payload)) {
+    if (!conn->receiveMessage(type, payload)) {
         std::cout << "error from " << remotePeerID << std::endl;
         close(new_fd);
         return;
@@ -219,25 +227,27 @@ void handleIncomingConnection(int new_fd, int peerProcessID) {
         if (sessionManager->isInteresting(incoming_bitfield)) {
             std::cout << " is interested in " << remotePeerID << std::endl;
             sessionManager->setInterested(remotePeerID);
-            conn.sendMessage(MessageType::INTERESTED, {});
+            conn->sendMessage(MessageType::INTERESTED, {});
         } else {
             sessionManager->setUninterested(remotePeerID);
-            conn.sendMessage(MessageType::NOT_INTERESTED, {});
+            conn->sendMessage(MessageType::NOT_INTERESTED, {});
         }
     } else {
         std::cout << " no bitfield from " << remotePeerID << std::endl;
         sessionManager->addNeighbor(remotePeerID, std::vector<uint8_t>((configUtils->getNumPieces()+7)/8, 0x00));
         handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
-    sessionManager->setNeighborConn(remotePeerID, &conn);
+    sessionManager->setNeighborConn(remotePeerID, conn);
 
     // Main message loop.
-    while (conn.receiveMessage(type, payload)) {
+    while (conn->receiveMessage(type, payload)) {
         handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
 
+    sessionManager->setNeighborConn(remotePeerID, nullptr);
+    sessionManager->cancelPendingRequests();
+    delete conn;
     close(new_fd);
-
 }
 
 int connectTo(int peerProcessID, PeerInfo* p_info) {
@@ -286,15 +296,15 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     freeaddrinfo(servinfo);
 
-    ConnectionManager conn(sockfd);
+    ConnectionManager* conn = new ConnectionManager(sockfd);
 
-    if (!conn.sendHandshakeMessage(peerProcessID)) {
+    if (!conn->sendHandshakeMessage(peerProcessID)) {
         close(sockfd);
         return 3;
     }
 
     int remotePeerID;
-    if (!conn.receiveHandshakeMessage(remotePeerID)) {
+    if (!conn->receiveHandshakeMessage(remotePeerID)) {
         close(sockfd);
         return 4;
     }
@@ -305,7 +315,7 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
     if (sessionManager->hasAnyPieces()) {
         std::vector<uint8_t> bitfield = sessionManager->myBitfield();
         std::vector<char> payload(bitfield.begin(), bitfield.end());
-        if (!conn.sendMessage(MessageType::BITFIELD, payload)) {
+        if (!conn->sendMessage(MessageType::BITFIELD, payload)) {
             close(sockfd);
             return 5;
         }
@@ -314,7 +324,7 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
 
     MessageType type;
     std::vector<char> payload;
-    if (!conn.receiveMessage(type, payload)) {
+    if (!conn->receiveMessage(type, payload)) {
         close(sockfd);
         return 6;
     }
@@ -327,27 +337,30 @@ int connectTo(int peerProcessID, PeerInfo* p_info) {
         if (sessionManager->isInteresting(incoming_bitfield)) {
             std::cout << " is interested in " << remotePeerID << std::endl;
             sessionManager->setInterested(remotePeerID);
-            conn.sendMessage(MessageType::INTERESTED, {});
+            conn->sendMessage(MessageType::INTERESTED, {});
         } else {
             sessionManager->setUninterested(remotePeerID);
-            conn.sendMessage(MessageType::NOT_INTERESTED, {});
+            conn->sendMessage(MessageType::NOT_INTERESTED, {});
         }
     } else {
         std::cout << "no bitfield from " << remotePeerID << std::endl;
         sessionManager->addNeighbor(remotePeerID, std::vector<uint8_t>((configUtils->getNumPieces()+7)/8, 0x00));
         handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
-    sessionManager->setNeighborConn(remotePeerID, &conn);
+    sessionManager->setNeighborConn(remotePeerID, conn);
 
-    while (conn.receiveMessage(type, payload)) {
+    while (conn->receiveMessage(type, payload)) {
         handleMessage(type, payload, remotePeerID, peerProcessID, conn);
     }
 
+    sessionManager->setNeighborConn(remotePeerID, nullptr);
+    sessionManager->cancelPendingRequests();
+    delete conn;
     close(sockfd);
     return 0;
 }
 
-void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager& conn) {
+void handleMessage(MessageType type, const std::vector<char>& payload, int remotePeerID, int peerProcessID, ConnectionManager* conn) {
     switch (type) {
         case MessageType::BITFIELD:
             {
@@ -371,7 +384,7 @@ void handleMessage(MessageType type, const std::vector<char>& payload, int remot
                     uint32_t network_next_piece_id = htonl((uint32_t) next_piece_id);
                     std::vector<char> requestMessage_Payload(4);
                     std::memcpy(requestMessage_Payload.data(), &network_next_piece_id, 4);
-                    conn.sendMessage(MessageType::REQUEST, requestMessage_Payload);
+                    conn->sendMessage(MessageType::REQUEST, requestMessage_Payload);
                 }
             }
             break;
@@ -398,13 +411,17 @@ void handleMessage(MessageType type, const std::vector<char>& payload, int remot
                 sessionManager->updateNeighborPiece(remotePeerID, piece_id);
 
                 std::vector<uint8_t> neighbor_bitfield = sessionManager->getNeighborState(remotePeerID).bitfield;
+                bool wasInterested = sessionManager->getNeighborState(remotePeerID).interested;
                 bool isInterested = sessionManager->isInteresting(neighbor_bitfield);
-                if (isInterested) {
+                if (isInterested && !wasInterested) {
                     sessionManager->setInterested(remotePeerID);
-                    conn.sendMessage(MessageType::INTERESTED, {});
-                } else {
+                    conn->sendMessage(MessageType::INTERESTED, {});
+                } else if (!isInterested && wasInterested) {
                     sessionManager->setUninterested(remotePeerID);
-                    conn.sendMessage(MessageType::NOT_INTERESTED, {});
+                    conn->sendMessage(MessageType::NOT_INTERESTED, {});
+                } 
+                if (sessionManager->allPeersComplete()) {
+                    triggerShutdown();
                 }
             }
             break;
@@ -424,7 +441,7 @@ void handleMessage(MessageType type, const std::vector<char>& payload, int remot
                 std::vector<char> pieceMessage_Payload(4 + piece_data.size());
                 std::memcpy(pieceMessage_Payload.data(), payload.data(), 4);
                 std::memcpy(pieceMessage_Payload.data() + 4, piece_data.data(), piece_data.size());
-                conn.sendMessage(MessageType::PIECE, pieceMessage_Payload);
+                conn->sendMessage(MessageType::PIECE, pieceMessage_Payload);
             }
             break;
         case MessageType::PIECE:
@@ -443,10 +460,12 @@ void handleMessage(MessageType type, const std::vector<char>& payload, int remot
                 std::memcpy(haveMessage_Payload.data(), payload.data(), 4);
                 sessionManager->broadcastHave(piece_id);
 
-                if (sessionManager->hasCompleteFile())
+                if (sessionManager->hasCompleteFile()) {
                     logUtils->logCompletion();
+                    sessionManager->broadcastNotInterested();
+                }
                 if (sessionManager->allPeersComplete()) {
-                    running = false;
+                    triggerShutdown();
                 }
 
                 PeerState peer_state = sessionManager->getNeighborState(remotePeerID);
@@ -456,7 +475,7 @@ void handleMessage(MessageType type, const std::vector<char>& payload, int remot
                         uint32_t network_next_piece_id = htonl((uint32_t) next_piece_id);
                         std::vector<char> requestMessage_Payload(4);
                         std::memcpy(requestMessage_Payload.data(), &network_next_piece_id, 4);
-                        conn.sendMessage(MessageType::REQUEST, requestMessage_Payload);
+                        conn->sendMessage(MessageType::REQUEST, requestMessage_Payload);
                     }
                 }
 
@@ -487,6 +506,10 @@ void runUnchokeAlgorithm(int peerProcessID) {
     sessionManager->applyChoking(preferred);
     logUtils->logUpdatePrefNeighbors(std::vector<unsigned int>(preferred.begin(), preferred.end()));
     sessionManager->resetDownloadRates();
+
+    if (sessionManager->allPeersComplete()) {
+        triggerShutdown();
+    } 
 }
 
 void runOptimisticUnchokeAlgorithm(int peerProcessID) {

@@ -52,15 +52,22 @@ void LogUtils::logConnectRecv(unsigned int remote) {
 void LogUtils::logUpdatePrefNeighbors(const std::vector<unsigned int>& neighbors) {
     std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
-    logFile << "Peer ";
-    logFile << host;
-    logFile << "has the preferred neighbors ";
-    for (unsigned int i = 0; i < neighbors.size(); ++i) {
-        if (i > 0) logFile << ", ";
-        logFile << neighbors[i];
+    if (neighbors.size() == 0) {
+        logFile << "Peer ";
+        logFile << host;
+        logFile << " has no preferred neighbors.";
+        logFile << std::endl;
+    } else {
+        logFile << "Peer ";
+        logFile << host;
+        logFile << " has the preferred neighbors ";
+        for (unsigned int i = 0; i < neighbors.size(); ++i) {
+            if (i > 0) logFile << ", ";
+            logFile << neighbors[i];
+        }
+        logFile << ".";
+        logFile << std::endl;
     }
-    logFile << ".";
-    logFile << std::endl;
 }
 
 void LogUtils::logUpdateOptUnchokedNeighbor(unsigned int remote) {

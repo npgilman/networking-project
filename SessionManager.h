@@ -87,6 +87,7 @@ class SessionManager {
 		int selectRandom(const std::vector<uint8_t> bitfield);
 
 		void broadcastHave(int piece_id);
+		void broadcastNotInterested();
 		void cancelPendingRequests();
 
 	private:
