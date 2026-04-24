@@ -1,6 +1,7 @@
 #include "ConnectionManager.h"
 
 bool ConnectionManager::sendAll(void* buffer, int length) {
+    std::lock_guard<std::mutex> lock(sendMutex);
 	int total = 0;
     char* buf = static_cast<char*>(buffer);
 
@@ -15,6 +16,7 @@ bool ConnectionManager::sendAll(void* buffer, int length) {
 }
 
 bool ConnectionManager::receiveAll(void* buffer, int length) {
+    std::lock_guard<std::mutex> lock(recvMutex);
     int total = 0;
     char* buf = static_cast<char*>(buffer);
 

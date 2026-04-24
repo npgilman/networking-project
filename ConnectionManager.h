@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 #include <sys/socket.h>
+#include <mutex>
 #include <unistd.h>
 #include <vector>
 #include <vector>
@@ -52,5 +53,7 @@ class ConnectionManager {
 		int socket_fd;
 		bool sendAll(void* buffer, int length);
 		bool receiveAll(void* buffer, int length);
+		std::mutex sendMutex;
+		std::mutex recvMutex;
 };
 

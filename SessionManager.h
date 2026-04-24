@@ -12,8 +12,11 @@
 #include <vector>
 #include <iostream>
 #include <cstring>
+#include <set>
+#include <random>
 
 #include "ConfigUtils.h"
+#include "ConnectionManager.h"
 
 struct PeerState {
     std::vector<uint8_t> bitfield;
@@ -22,8 +25,7 @@ struct PeerState {
     bool remote_interested = false;
     bool remote_choked = true;
     float downloadRate = 0.0;
-    int socket_fd;
-    std::mutex state_mutex;
+    ConnectionManager* conn = nullptr;
 } typedef PeerState;
 
 class SessionManager {
@@ -39,6 +41,7 @@ class SessionManager {
 			}
 		}
 
+		/* communication functions */
 		bool hasPiece(uint32_t pieceIndex);
 		unsigned int actualPieceSize(unsigned int index);
 		bool hasCompleteFile();
@@ -47,8 +50,13 @@ class SessionManager {
 		unsigned int pieceSize(unsigned int index);
 		std::vector<uint8_t> myBitfield();
 		bool allPeersComplete();
+		unsigned int countPieces();
 
+		/* initiallization functions */
 		void addNeighbor(unsigned int neighbor_id, const std::vector<uint8_t>& neighbor_bitfield);
+		void setNeighborConn(unsigned int neighbor_id, ConnectionManager* conn);
+
+
 		/* toggle interests */
 		void setInterested(unsigned int neighbor_id);
 		void setUninterested(unsigned int neighbor_id);
@@ -70,6 +78,17 @@ class SessionManager {
 		bool storePiece(unsigned int piece_id, const std::vector<char>& data);
 		std::vector<char> readPiece(unsigned int piece_id);
 
+		/* choking algorithm functions */
+		std::vector<std::pair<int, double>> getInterestedNeighbors();
+		void applyChoking(const std::vector<int>& preferred);
+		void resetDownloadRates();
+		int selectOptimisticNeighbor();
+		void setOptimisticNeighbor(int chosen_neighbor_id);
+		int selectRandom(const std::vector<uint8_t> bitfield);
+
+		void broadcastHave(int piece_id);
+		void cancelPendingRequests();
+
 	private:
 		void initBitfield();
 		void openFile();
@@ -80,6 +99,8 @@ class SessionManager {
 		std::mutex peer_mutex;
 		std::vector<uint8_t> peer_bitfield;
 		std::map<unsigned int, PeerState> neighbors;
+		std::set<int> requestedPieces; 
 
+		int opt_neighbor_id = -1;
 		std::fstream fileObj;
 };

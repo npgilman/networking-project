@@ -2,7 +2,7 @@
 
 
 unsigned int SessionManager::actualPieceSize(unsigned int index) {
-	if (index < configUtils.getNumPieces()) {
+	if (index < configUtils.getNumPieces() - 1) {
 		return configUtils.getPieceSize();
 	}
 	return configUtils.getFileSize() - ((configUtils.getNumPieces() - 1) * configUtils.getPieceSize());
@@ -35,7 +35,6 @@ void SessionManager::openFile() {
 			exit(1);
 		}
 	}  else {
-		fileObj.open(filePath);
 		fileObj.open(filePath, std::ios::in | std::ios::out | std::ios::binary | std::ios::trunc);
 
 		// file file to specified size and use later
@@ -180,6 +179,7 @@ bool SessionManager::storePiece(unsigned int piece_id, const std::vector<char>& 
 	fileObj.flush();
 
     peer_bitfield[piece_id / 8] = peer_bitfield[piece_id / 8] | (1 << (7 - (piece_id % 8)));
+    requestedPieces.erase(piece_id);
     return true;
 
 }
@@ -219,4 +219,124 @@ bool SessionManager::allPeersComplete() {
 	}
 
 	return true;
+}
+
+void SessionManager::applyChoking(const std::vector<int>& preferred) {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+
+	std::set<int> preferred_neighbors_set(preferred.begin(), preferred.end());
+	for (auto& pair : neighbors) {
+		bool bChoke = (preferred_neighbors_set.find(pair.first) == preferred_neighbors_set.end()) && (opt_neighbor_id != pair.first);
+
+		MessageType message_type;
+		if (bChoke && !pair.second.remote_choked) {
+			pair.second.remote_choked = true;
+			pair.second.conn->sendMessage(MessageType::CHOKE, {});
+		} else if (!bChoke && pair.second.remote_choked) {
+			pair.second.remote_choked = false;
+			pair.second.conn->sendMessage(MessageType::UNCHOKE, {});
+		}
+	}
+}
+
+void SessionManager::setNeighborConn(unsigned int neighbor_id, ConnectionManager* conn) {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	neighbors[neighbor_id].conn = conn;	
+}
+
+unsigned int SessionManager::countPieces() {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	unsigned int numPieces = configUtils.getNumPieces();
+	unsigned int count = 0;
+
+	for (int i = 0; i < numPieces; i++) {
+		int byte = i/8;
+		int bit = 7 - (i % 8);
+		if ((peer_bitfield[byte] >> bit) & 1) {
+			count++;
+		}
+	}
+	return count;
+}
+
+void SessionManager::broadcastHave(int piece_id) {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+
+	uint32_t network_piece_id = htonl(piece_id);
+	std::vector<char> payload(4);
+	std::memcpy(payload.data(), &network_piece_id, 4);
+
+	for (auto& pair : neighbors) {
+		pair.second.conn->sendMessage(MessageType::HAVE, payload);
+	}
+}
+
+std::vector<std::pair<int, double>> SessionManager::getInterestedNeighbors() {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	std::vector<std::pair<int,double>> result;
+	for (auto& pair : neighbors) {
+		if (pair.second.remote_interested) {
+			result.push_back({pair.first, pair.second.downloadRate});
+		}
+	}
+
+	return result;
+}
+
+void SessionManager::resetDownloadRates() {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	for (auto& pair : neighbors) {
+		pair.second.downloadRate = 0.0;
+	}
+}
+
+int SessionManager::selectRandom(const std::vector<uint8_t> bitfield) {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	unsigned int numPieces = configUtils.getNumPieces();
+
+	std::vector<int> candidates;
+	for (int i = 0; i < numPieces; i++) {
+		int byteIndex = i / 8;
+		int bitPos = 7 - (i % 8);
+
+		bool weLack = (((peer_bitfield[byteIndex] >> bitPos) & 1) != 1);
+		bool theyLack = (((bitfield[byteIndex] >> bitPos) & 1) != 1);
+		bool requested = requestedPieces.count(i) > 0;
+		if (weLack && !theyLack && !requested) {
+			candidates.push_back(i);
+		}
+	}
+
+	if (candidates.empty()) return -1;
+	std::random_device rd;
+	std::shuffle(candidates.begin(), candidates.end(), std::mt19937{rd()});
+	requestedPieces.insert(candidates[0]);
+	return candidates[0];
+}
+
+int SessionManager::selectOptimisticNeighbor() {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+
+	std::vector<int> candidates;
+	for (auto& pair : neighbors) {
+		if (pair.second.remote_choked && pair.second.remote_interested) {
+			candidates.push_back(pair.first);
+		}
+
+	}
+
+	if (candidates.empty()) return -1;
+	std::random_device rd;
+	std::shuffle(candidates.begin(), candidates.end(), std::mt19937{rd()});
+	return candidates[0];
+}
+
+void SessionManager::setOptimisticNeighbor(int chosen_neighbor_id) {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	opt_neighbor_id = chosen_neighbor_id;
+}
+
+void SessionManager::cancelPendingRequests() {
+	std::lock_guard<std::mutex> lock(peer_mutex);
+	requestedPieces.clear();
 }

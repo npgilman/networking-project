@@ -43,6 +43,18 @@ class ConfigUtils {
 		// void setComplete(unsigned int peer_id) {
 		// 	peerInfo[peerID2idx[peer_id]]->hasCompleteFile = true;
 		// }
+		unsigned int getNumPreferredNeighbors() const {
+			return numPreferredNeighbors;
+		}
+		unsigned int getUnchokingInterval() const { 
+				return unchokingInterval;
+			}
+		unsigned int getOptimisticUnchokingInterval() const { 
+			return optimisticUnchokingInterval;
+		}
+		unsigned int getNumPeers() const {
+			return peerInfo.size();
+		}
 
 	private:
 		void readCommonConfig();

@@ -26,7 +26,7 @@ class LogUtils {
 		void logUpdateOptUnchokedNeighbor(unsigned int remote);
 		void logUnchoking(unsigned int remote);
 		void logChoking(unsigned int remote);
-		void logRecvHave(unsigned int remote);
+		void logRecvHave(unsigned int remote, unsigned int piece_id);
 		void logRecvInterested(unsigned int remote);
 		void logRecvNotInterested(unsigned int remote);
 		void logDownloaded(unsigned int remote, unsigned int piece, unsigned int total);

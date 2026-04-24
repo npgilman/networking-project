@@ -96,13 +96,15 @@ void LogUtils::logChoking(unsigned int remote) {
     logFile << std::endl;
 }
 
-void LogUtils::logRecvHave(unsigned int remote) {
+void LogUtils::logRecvHave(unsigned int remote, unsigned int piece_id) {
     std::lock_guard<std::mutex> lock(log_mutex);
     logTimestamp();
     logFile << "Peer ";
     logFile << host;
     logFile << " received the 'have' message from ";
     logFile << remote;
+    logFile << " for the piece ";
+    logFile << piece_id;
     logFile << ".";
     logFile << std::endl;
 }
